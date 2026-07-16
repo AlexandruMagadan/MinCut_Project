@@ -1,141 +1,132 @@
 import random
+
 import networkx as nx
+import numpy as np
 import scipy.io as sio
 
+"""
+Test
+"""
+def print_adj_list(l):
+    print("--- Generated Adjacency List (Preview) ---")
+    print(f"Total nodes in graph: {len(l)}")
+    count = 0
+    for node, neighbors in sorted(l.items()):
+        print(f"Node {node}: {neighbors}")
+        count += 1
+        if count >= 100:
+            print("... (output limited to first 100 nodes for readability)")
+            break
 
-def load_raw_graph_data(filepath):
-    """Loads raw graph data from a file, bypassing NetworkX for maximum speed."""
-    edges_list = []
-    nodes_set = set()
+def load_adjacency_list(filepath):
+    """
+    Read the graph from data and build the Adjacency List asociated
+    """
+    adj = {}
 
     if filepath.suffix == ".mtx":
         sparse_matrix = sio.mmread(filepath, spmatrix=False)
         G_temp = nx.MultiGraph(sparse_matrix)
-        edges_list = list(G_temp.edges(keys=False))
-        nodes_set = set(G_temp.nodes())
+
+        for node in G_temp.nodes():
+            adj[node] = []
+
+        # Populăm listele cu muchiile (inclusiv muchiile multiple)
+        for u, v in G_temp.edges(keys=False):
+            adj[u].append(v)
+            adj[v].append(u)
+
     elif filepath.suffix == ".edges":
         with open(filepath, 'r') as f:
             for line in f:
-                if line.startswith('%') or line.startswith('#'): continue
+                if line.startswith('%') or line.startswith('#'):
+                    continue
+
                 parts = line.replace(',', ' ').split()
                 if len(parts) >= 2:
-                    u, v = int(float(parts[0])), int(float(parts[1]))
-                    edges_list.append((u, v))
-                    nodes_set.add(u)
-                    nodes_set.add(v)
-    return list(nodes_set), edges_list
+                    u = int(float(parts[0]))
+                    v = int(float(parts[1]))
+
+                    # Dacă nodurile nu există în dicționar, le creăm
+                    if u not in adj:
+                        adj[u] = []
+                    if v not in adj:
+                        adj[v] = []
+
+                    # Adăugăm vecinii (graf neorientat)
+                    adj[u].append(v)
+                    adj[v].append(u)
+
+    return adj
+
+def rand_edge_choise(l):
+    active_vertices=list(l.keys())
+    degrees = [len(l[node]) for node in active_vertices]
+    u_rand = random.choices(active_vertices,weights=degrees)[0]
+    v_rand = random.choice(l[u_rand])
+
+    return (u_rand,v_rand)
+
+def contract(l,u,v):
+    if u == v:
+        l[u] = [neighbor for neighbor in l[u] if neighbor != u]
+        return l
+
+    for neighbor in l[v]:
+        for i in range(len(l[neighbor])):
+            if l[neighbor][i] == v:
+                l[neighbor][i] = u
+    l[u].extend(l[v])
+    del l[v]
+    l[u] = [neighbor for neighbor in l[u] if neighbor !=u]
+    return l
+
+def karger_iteration(l):
+    e=rand_edge_choise(l)
+    l=contract(l,e[0],e[1])
+    return l
+
+def karger(l):
+    while len(l) > 2:
+        l=karger_iteration(l)
+
+    noduri_ramase = list(l.keys())
+    print(noduri_ramase)
+    dimensiune_taietura = len(l[noduri_ramase[0]])
+    return dimensiune_taietura
+def karger_iteraded(l):
+    n=len(l)
+    h = (n ** 2) // 2
+    min=float('inf')
+    for i in range (h):
+        l_copy = {node: neighbors.copy() for node, neighbors in l.items()}
+        k=karger(l_copy)
+        if k < min:
+            min=k
+    return min
+
+if __name__ == "__main__":
+    from pathlib import Path
+    import sys
+
+    project_root = Path(__file__).resolve().parent.parent
+    data_dir = project_root / "data"
+
+    if not data_dir.exists():
+        print(f"Error: Folder '{data_dir}' not found.")
+        sys.exit()
 
 
-def compute_actual_mincut_core(nodes_list, edges, n, h):
-    """Runs the Union-Find algorithm h times to find the guaranteed minimum cut."""
-    min_cut_found = float('inf')
-    best_partition = {}
+    valid_files = [f for f in data_dir.glob("*.*") if f.suffix in ['.mtx', '.edges']]
 
-    for _ in range(h):
-        edges_iter = edges.copy()
-        random.shuffle(edges_iter)
-        parent = {node: node for node in nodes_list}
+    if not valid_files:
+        print("Error: No .mtx or .edges files found in the 'data' folder.")
+        sys.exit()
 
-        def find(i):
-            if parent[i] == i: return i
-            parent[i] = find(parent[i])
-            return parent[i]
+    # Alegem automat primul fisier gasit in folder
+    test_file = random.choice(valid_files)
+    print(f"Loading real graph from: {test_file.name}...\n")
 
-        num_components = n
-        for u, v in edges_iter:
-            if num_components <= 2: break
-            root_u, root_v = find(u), find(v)
-            if root_u != root_v:
-                parent[root_v] = root_u
-                num_components -= 1
-
-        cut_size = 0
-        for u, v in edges_iter:
-            if find(u) != find(v): cut_size += 1
-
-        if cut_size < min_cut_found:
-            min_cut_found = cut_size
-            temp_partition = {}
-            for node in nodes_list:
-                root = find(node)
-                if root not in temp_partition:
-                    temp_partition[root] = []
-                temp_partition[root].append(node)
-            best_partition = temp_partition
-
-    return min_cut_found, best_partition
-
-
-def simulate_complexity_core(nodes_list, edges, n, h):
-    """Runs Karger and counts fundamental operations for the complexity study."""
-    min_cut_found = float('inf')
-    fundamental_operations = 0
-
-    for _ in range(h):
-        edges_iter = edges.copy()
-        random.shuffle(edges_iter)
-        parent = {node: node for node in nodes_list}
-
-        def find(i):
-            if parent[i] == i: return i
-            parent[i] = find(parent[i])
-            return parent[i]
-
-        num_components = n
-        for u, v in edges_iter:
-            fundamental_operations += 1
-            if num_components <= 2: break
-            root_u, root_v = find(u), find(v)
-            if root_u != root_v:
-                parent[root_v] = root_u
-                num_components -= 1
-
-        cut_size = 0
-        for u, v in edges_iter:
-            fundamental_operations += 1
-            if find(u) != find(v): cut_size += 1
-
-        if cut_size < min_cut_found:
-            min_cut_found = cut_size
-
-    return fundamental_operations
-
-
-def skip_to_end_core(nodes_list, edges, node_contents, current_step):
-    """Executes contractions rapidly and generates the log for UI visualization."""
-    random.shuffle(edges)
-    parent = {n: n for n in nodes_list}
-
-    def find(i):
-        if parent[i] == i: return i
-        parent[i] = find(parent[i])
-        return parent[i]
-
-    num_components = len(nodes_list)
-    log_messages = []
-    step = current_step
-
-    for u, v in edges:
-        if num_components <= 2: break
-        root_u, root_v = find(u), find(v)
-
-        if root_u != root_v:
-            node_contents[root_u].extend(node_contents[root_v])
-            del node_contents[root_v]
-
-            msg = f"STEP {step}: Node {root_v} merges into {root_u}.\nSuper-node [{root_u}] now contains:\n{node_contents[root_u]}\n\n"
-            log_messages.append(msg)
-
-            parent[root_v] = root_u
-            num_components -= 1
-            step += 1
-
-    G_final = nx.MultiGraph()
-    G_final.add_nodes_from(node_contents.keys())
-
-    for u, v in edges:
-        root_u, root_v = find(u), find(v)
-        if root_u != root_v:
-            G_final.add_edge(root_u, root_v)
-
-    return G_final, log_messages, step, node_contents
+    # Apelam functia ta
+    adj_list = load_adjacency_list(test_file)
+    print(karger_iteraded(adj_list))

@@ -4,11 +4,9 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import networkx as nx
 import time
-import random
 import threading
-import scipy.io as sio
 
-from core.karger import load_raw_graph_data, compute_actual_mincut_core, simulate_complexity_core, skip_to_end_core
+from core.karger import load_adjacency_list,karger_iteration, karger_iteraded
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
@@ -21,10 +19,10 @@ class MinCutApp(ctk.CTk):
         self.title("Min-Cut Simulator (Karger's Algorithm)")
         self.geometry("1050x800")
 
-        self.graph = None
-        self.data_dir = Path("data")
+        self.adj_list = None
+        self.data_dir = Path(__file__).resolve().parent.parent / "data"
 
-        self.G_viz = None
+        self.adj_viz = None
         self.viz_current_step = 0
         self.node_contents = {}
 
@@ -34,7 +32,6 @@ class MinCutApp(ctk.CTk):
 
         self.control_frame = ctk.CTkFrame(self)
         self.control_frame.pack(pady=5, padx=20, fill="x")
-
         self.control_frame.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="col")
 
         files = self.get_graph_files()
@@ -97,22 +94,11 @@ class MinCutApp(ctk.CTk):
 
         filepath = self.data_dir / filename
         try:
-            if filename.endswith(".mtx"):
-                sparse_matrix = sio.mmread(filepath, spmatrix=False)
-                self.graph = nx.MultiGraph(sparse_matrix)
-            elif filename.endswith(".edges"):
-                self.graph = nx.MultiGraph()
-                with open(filepath, 'r') as f:
-                    for line in f:
-                        if line.startswith('%') or line.startswith('#'): continue
-                        parts = line.replace(',', ' ').split()
-                        if len(parts) >= 2:
-                            self.graph.add_edge(int(float(parts[0])), int(float(parts[1])))
-            else:
-                return
 
-            n = self.graph.number_of_nodes()
-            m = self.graph.number_of_edges()
+            self.adj_list = load_adjacency_list(filepath)
+
+            n = len(self.adj_list)
+            m = sum(len(neighbors) for neighbors in self.adj_list.values()) // 2
 
             self.info_label.configure(text=f"Loaded: {filename} (Nodes: {n}, Edges: {m})", text_color="#2ecc71")
             self.log_box.delete("0.0", "end")
@@ -123,13 +109,26 @@ class MinCutApp(ctk.CTk):
             self.viz_next_btn.configure(state="disabled")
             self.viz_skip_btn.configure(state="disabled")
 
-            self.draw_graph_ui(self.graph, title=f"Initial Topology: {filename}")
+            # Desenăm starea inițială convertind temporar lista pentru UI
+            G_initial = self._adj_to_networkx(self.adj_list)
+            self.draw_graph_ui(G_initial, title=f"Initial Topology: {filename}")
+
         except Exception as e:
             self.info_label.configure(text=f"Read Error: {e}", text_color="#e74c3c")
 
+    def _adj_to_networkx(self, adj):
+        G = nx.MultiGraph()
+        for node in adj.keys():
+            G.add_node(node)
+        for u, neighbors in adj.items():
+            for v in neighbors:
+                if u <= v:  # Prevenim adăugarea dublă pentru vizualizare
+                    G.add_edge(u, v)
+        return G
+
     def calculate_actual_mincut(self):
-        if self.graph is None or self.graph.number_of_nodes() < 2: return
-        n = self.graph.number_of_nodes()
+        if self.adj_list is None or len(self.adj_list) < 2: return
+        n = len(self.adj_list)
         h = (n ** 2) // 2
 
         self.calc_actual_btn.configure(state="disabled")
@@ -140,31 +139,23 @@ class MinCutApp(ctk.CTk):
                                   text_color="#f39c12")
         self.log_box.delete("0.0", "end")
         self.log_box.insert("end",
-                            f"--- Min-Cut Search ---\nGraph has {n} nodes.\nAccording to theory, running h = {h} times.\n\nComputing...\n")
+                            f"--- Min-Cut Search ---\nGraph has {n} nodes.\nRunning h = {h} Monte Carlo iterations.\n\nComputing...\n")
         self.update()
 
-        threading.Thread(target=self._worker_actual_mincut, args=(n, h), daemon=True).start()
+        threading.Thread(target=self._worker_actual_mincut, args=(self.adj_list,), daemon=True).start()
 
-    def _worker_actual_mincut(self, n, h):
-        edges = list(self.graph.edges(keys=False))
-        nodes_list = list(self.graph.nodes())
+    def _worker_actual_mincut(self, adj_list):
         start_time = time.time()
 
-        min_cut_found, best_partition = compute_actual_mincut_core(nodes_list, edges, n, h)
+        min_cut_found = karger_iteraded(adj_list)
 
         total_time = time.time() - start_time
-        self.after(0, lambda: self._finalize_actual_mincut(min_cut_found, best_partition, total_time))
+        self.after(0, lambda: self._finalize_actual_mincut(min_cut_found, total_time))
 
-    def _finalize_actual_mincut(self, min_cut_found, best_partition, total_time):
+    def _finalize_actual_mincut(self, min_cut_found, total_time):
         self.info_label.configure(text=f"Calculation finished in {total_time:.2f} seconds! Min-Cut: {min_cut_found}",
                                   text_color="#2ecc71")
-
-        partition_list = list(best_partition.values())
-        partition_A = partition_list[0] if len(partition_list) > 0 else []
-        partition_B = partition_list[1] if len(partition_list) > 1 else []
-
-        result_text = f"--- FINAL RESULT ---\nMin-Cut Value: {min_cut_found}\n\nThe cut divides the network into:\n\nPartition A ({len(partition_A)} nodes):\n{sorted(partition_A)}\n\nPartition B ({len(partition_B)} nodes):\n{sorted(partition_B)}\n"
-        self.log_box.insert("end", result_text)
+        self.log_box.insert("end", f"\n--- FINAL RESULT ---\nGuaranteed Min-Cut Value: {min_cut_found}\n")
         self.log_box.see("end")
 
         self.calc_actual_btn.configure(state="normal")
@@ -172,70 +163,68 @@ class MinCutApp(ctk.CTk):
         self.bulk_button.configure(state="normal")
 
     def start_visualization(self):
-        if self.graph is None: return
-        if self.graph.number_of_nodes() > 100:
+        if self.adj_list is None: return
+        if len(self.adj_list) > 100:
             self.info_label.configure(text="Error: Graph is too dense for clear visualization.", text_color="#e74c3c")
             return
 
-        self.G_viz = self.graph.copy()
+        self.adj_viz = {node: neighbors.copy() for node, neighbors in self.adj_list.items()}
         self.viz_current_step = 1
-        self.node_contents = {n: [n] for n in self.G_viz.nodes()}
+        self.node_contents = {n: [n] for n in self.adj_viz.keys()}
 
         self.viz_next_btn.configure(state="normal")
         self.viz_skip_btn.configure(state="normal")
         self.calc_actual_btn.configure(state="disabled")
 
         self.log_box.delete("0.0", "end")
-        self.log_box.insert("end",
-                            "--- Single Run Visualization ---\nNOTE: This run does not guarantee the absolute minimum cut.\n\n")
+        self.log_box.insert("end", "--- Single Run Visualization ---\nNOTE: This run uses Graph Minor explicitly.\n\n")
         self.info_label.configure(text="Visualization Mode Activated. Press 'Next Step'.", text_color="white")
-        self.draw_graph_ui(self.G_viz, title="Initial State")
+
+        G_draw = self._adj_to_networkx(self.adj_viz)
+        self.draw_graph_ui(G_draw, title="Initial State")
 
     def execute_visualization_step(self):
-        if self.G_viz.number_of_nodes() <= 2:
+        if len(self.adj_viz) <= 2:
             self.finish_visualization()
             return
 
-        edges = list(self.G_viz.edges(keys=False))
-        if not edges: return
+        # Apelăm funcția ta modificată
+        self.adj_viz, u, v = karger_iteration(self.adj_viz)
 
-        u, v = random.choice(edges)
+        # Ținem minte ce noduri au fost unificate
         self.node_contents[u].extend(self.node_contents[v])
         del self.node_contents[v]
 
-        self.G_viz = nx.contracted_edge(self.G_viz, (u, v), self_loops=False)
-
         self.log_box.insert("end",
-                            f"STEP {self.viz_current_step}: Node {v} merges into {u}.\nStructure [{u}]: {self.node_contents[u]}\n\n")
+                            f"STEP {self.viz_current_step}: Node {v} merges into {u}.\nRemaining Nodes: {len(self.adj_viz)}\n\n")
         self.log_box.see("end")
 
         self.info_label.configure(
-            text=f"Step {self.viz_current_step}: {v} merged into {u}. Remaining: {self.G_viz.number_of_nodes()}",
+            text=f"Step {self.viz_current_step}: {v} merged into {u}. Remaining: {len(self.adj_viz)}",
             text_color="#f1c40f")
-        self.draw_graph_ui(self.G_viz, title=f"Contraction Step {self.viz_current_step}", highlight_node=u)
+
+        G_draw = self._adj_to_networkx(self.adj_viz)
+        self.draw_graph_ui(G_draw, title=f"Contraction Step {self.viz_current_step}", highlight_node=u)
 
         self.viz_current_step += 1
-        if self.G_viz.number_of_nodes() <= 2:
+        if len(self.adj_viz) <= 2:
             self.finish_visualization()
 
     def skip_to_end_visualization(self):
-        if self.G_viz is None or self.G_viz.number_of_nodes() <= 2: return
+        if self.adj_viz is None or len(self.adj_viz) <= 2: return
         self.info_label.configure(text="Calculating final cut and log history...", text_color="white")
         self.update()
 
-        nodes_list = list(self.G_viz.nodes())
-        edges = list(self.G_viz.edges(keys=False))
+        while len(self.adj_viz) > 2:
+            self.adj_viz, u, v = karger_iteration(self.adj_viz)
 
-        G_final, log_messages, new_step, new_contents = skip_to_end_core(nodes_list, edges, self.node_contents,
-                                                                         self.viz_current_step)
+            self.node_contents[u].extend(self.node_contents[v])
+            del self.node_contents[v]
 
-        if log_messages:
-            self.log_box.insert("end", "".join(log_messages))
-            self.log_box.see("end")
+            self.viz_current_step += 1
 
-        self.G_viz = G_final
-        self.viz_current_step = new_step
-        self.node_contents = new_contents
+        self.log_box.insert("end", "Skipped to end.\n")
+        self.log_box.see("end")
         self.finish_visualization()
 
     def finish_visualization(self):
@@ -243,9 +232,12 @@ class MinCutApp(ctk.CTk):
         self.viz_skip_btn.configure(state="disabled")
         self.calc_actual_btn.configure(state="normal")
 
-        cut_size = self.G_viz.number_of_edges()
+        noduri_ramase = list(self.adj_viz.keys())
+        cut_size = len(self.adj_viz[noduri_ramase[0]])
+
         self.info_label.configure(text=f"Visual Run Completed. Cut Found = {cut_size}", text_color="#2ecc71")
-        self.draw_graph_ui(self.G_viz, title=f"Final Partition (Cut = {cut_size})")
+        G_draw = self._adj_to_networkx(self.adj_viz)
+        self.draw_graph_ui(G_draw, title=f"Final Partition (Cut = {cut_size})")
 
     def process_collection(self):
         valid_files = [f for f in self.data_dir.glob("*.*") if f.suffix in ['.mtx', '.edges']]
@@ -254,7 +246,7 @@ class MinCutApp(ctk.CTk):
         self.bulk_button.configure(state="disabled")
         self.calc_actual_btn.configure(state="disabled")
         self.viz_start_btn.configure(state="disabled")
-        self.info_label.configure(text=f"Starting background analysis for {len(valid_files)} files...",
+        self.info_label.configure(text=f"Starting complexity projection for {len(valid_files)} files...",
                                   text_color="white")
 
         threading.Thread(target=self._worker_analysis, args=(valid_files,), daemon=True).start()
@@ -263,14 +255,10 @@ class MinCutApp(ctk.CTk):
         results = []
         for file in valid_files:
             try:
-                nodes_list, edges = load_raw_graph_data(file)
-                n = len(nodes_list)
+                adj = load_adjacency_list(file)
+                n = len(adj)
                 if n > 150 or n < 2: continue
-
-                h = (n ** 2) // 2
-                self.info_label.configure(text=f"Simulating: {file.name} (n={n}, iterations={h})...")
-
-                ops = simulate_complexity_core(nodes_list, edges, n, h)
+                ops = (n ** 3) // 2
                 results.append((n, ops))
 
             except Exception as e:
@@ -286,14 +274,14 @@ class MinCutApp(ctk.CTk):
         self.draw_complexity_plot(results)
         self.info_label.configure(text="Complexity study completed.", text_color="#2ecc71")
         self.bulk_button.configure(state="normal")
-        if self.graph:
+        if self.adj_list:
             self.calc_actual_btn.configure(state="normal")
             self.viz_start_btn.configure(state="normal")
 
     def _analysis_error(self):
         self.info_label.configure(text="Error: No graph < 150 nodes processed.", text_color="#e74c3c")
         self.bulk_button.configure(state="normal")
-        if self.graph:
+        if self.adj_list:
             self.calc_actual_btn.configure(state="normal")
             self.viz_start_btn.configure(state="normal")
 
@@ -339,9 +327,9 @@ class MinCutApp(ctk.CTk):
         operations = [r[1] for r in results]
 
         ax.plot(nodes, operations, marker='o', linestyle='-', color='#e74c3c', linewidth=2, markersize=6)
-        ax.set_title("Experimental Complexity Study", color='white', pad=10)
+        ax.set_title("Theoretical Operations Complexity", color='white', pad=10)
         ax.set_xlabel("Number of Nodes (n)", color='white')
-        ax.set_ylabel("Total Fundamental Operations", color='white')
+        ax.set_ylabel("Total Mathematical Operations", color='white')
 
         ax.tick_params(axis='x', colors='white')
         ax.tick_params(axis='y', colors='white')
@@ -353,3 +341,8 @@ class MinCutApp(ctk.CTk):
         canvas_ui.pack(fill="both", expand=True)
         self.plot_frame.update_idletasks()
         self.canvas_widget.draw()
+
+
+if __name__ == "__main__":
+    app = MinCutApp()
+    app.mainloop()

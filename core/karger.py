@@ -84,11 +84,11 @@ def contract(l,u,v):
 def karger_iteration(l):
     e=rand_edge_choise(l)
     l=contract(l,e[0],e[1])
-    return l
+    return l,e[0], e[1]
 
 def karger(l):
     while len(l) > 2:
-        l=karger_iteration(l)
+        l,u,v=karger_iteration(l)
 
     noduri_ramase = list(l.keys())
     print(noduri_ramase)

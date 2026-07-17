@@ -256,9 +256,14 @@ class MinCutApp(ctk.CTk):
             try:
                 adj = load_adjacency_list(file)
                 n = len(adj)
-                if n > 150 or n < 2: continue
-                ops = (n ** 3) // 2
-                results.append((n, ops))
+                if n > 80 or n < 2: continue
+
+                start_time = time.time()
+                karger_iteraded(adj)
+                exec_time = time.time() - start_time
+
+                results.append((n, exec_time))
+                print(f"Graf cu {n} noduri procesat în {exec_time:.4f} secunde.")
 
             except Exception as e:
                 print(f"Internal error on {file.name}: {e}")
@@ -268,7 +273,6 @@ class MinCutApp(ctk.CTk):
             self.after(0, lambda: self._finalize_analysis(results))
         else:
             self.after(0, self._analysis_error)
-
     def _finalize_analysis(self, results):
         self.draw_complexity_plot(results)
         self.info_label.configure(text="Complexity study completed.", text_color="#2ecc71")
@@ -318,22 +322,32 @@ class MinCutApp(ctk.CTk):
             self.canvas_widget.get_tk_widget().destroy()
             plt.close('all')
 
-        fig, ax = plt.subplots(figsize=(5, 4))
+        fig, ax = plt.subplots(figsize=(7, 4))  # Am mărit puțin lățimea la 7 pentru a încăpea legenda
         fig.patch.set_facecolor('#2b2b2b')
         ax.set_facecolor('#2b2b2b')
 
         nodes = [r[0] for r in results]
-        operations = [r[1] for r in results]
+        execution_times = [r[1] for r in results]
 
-        ax.plot(nodes, operations, marker='o', linestyle='-', color='#e74c3c', linewidth=2, markersize=6)
-        ax.set_title("Theoretical Operations Complexity", color='white', pad=10)
+        c = max([t / (n ** 4) for n, t in zip(nodes, execution_times)])
+        theoretical_times = [c * (n ** 4) for n in nodes]
+
+        ax.plot(nodes, execution_times, marker='o', linestyle='-', color='#e74c3c', linewidth=2, markersize=6,
+                label="Empirical Time (Actual)")
+
+        label_teoretic = f"Theoretical Bound (c ≈ {c:.2e} s/op)"
+        ax.plot(nodes, theoretical_times, marker='', linestyle='--', color='#3498db', linewidth=2, alpha=0.8,
+                label=label_teoretic)
+
+        ax.set_title("Empirical vs Theoretical Upper Bound", color='white', pad=10)
         ax.set_xlabel("Number of Nodes (n)", color='white')
-        ax.set_ylabel("Total Mathematical Operations", color='white')
+        ax.set_ylabel("Execution Time (seconds)", color='white')
 
         ax.tick_params(axis='x', colors='white')
         ax.tick_params(axis='y', colors='white')
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
         ax.grid(True, color='#555555', linestyle='--', alpha=0.7)
+
+        ax.legend(loc='upper left', facecolor='#2b2b2b', edgecolor='#555555', labelcolor='white')
 
         self.canvas_widget = FigureCanvasTkAgg(fig, master=self.plot_frame)
         canvas_ui = self.canvas_widget.get_tk_widget()

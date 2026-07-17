@@ -109,7 +109,6 @@ class MinCutApp(ctk.CTk):
             self.viz_next_btn.configure(state="disabled")
             self.viz_skip_btn.configure(state="disabled")
 
-            # Desenăm starea inițială convertind temporar lista pentru UI
             G_initial = self._adj_to_networkx(self.adj_list)
             self.draw_graph_ui(G_initial, title=f"Initial Topology: {filename}")
 
@@ -122,7 +121,7 @@ class MinCutApp(ctk.CTk):
             G.add_node(node)
         for u, neighbors in adj.items():
             for v in neighbors:
-                if u <= v:  # Prevenim adăugarea dublă pentru vizualizare
+                if u <= v:
                     G.add_edge(u, v)
         return G
 
@@ -188,10 +187,10 @@ class MinCutApp(ctk.CTk):
             self.finish_visualization()
             return
 
-        # Apelăm funcția ta modificată
+
         self.adj_viz, u, v = karger_iteration(self.adj_viz)
 
-        # Ținem minte ce noduri au fost unificate
+
         self.node_contents[u].extend(self.node_contents[v])
         del self.node_contents[v]
 

@@ -31,7 +31,6 @@ def load_adjacency_list(filepath):
         for node in G_temp.nodes():
             adj[node] = []
 
-        # Populăm listele cu muchiile (inclusiv muchiile multiple)
         for u, v in G_temp.edges(keys=False):
             adj[u].append(v)
             adj[v].append(u)
@@ -47,13 +46,11 @@ def load_adjacency_list(filepath):
                     u = int(float(parts[0]))
                     v = int(float(parts[1]))
 
-                    # Dacă nodurile nu există în dicționar, le creăm
                     if u not in adj:
                         adj[u] = []
                     if v not in adj:
                         adj[v] = []
 
-                    # Adăugăm vecinii (graf neorientat)
                     adj[u].append(v)
                     adj[v].append(u)
 
@@ -123,10 +120,9 @@ if __name__ == "__main__":
         print("Error: No .mtx or .edges files found in the 'data' folder.")
         sys.exit()
 
-    # Alegem automat primul fisier gasit in folder
+
     test_file = random.choice(valid_files)
     print(f"Loading real graph from: {test_file.name}...\n")
 
-    # Apelam functia ta
     adj_list = load_adjacency_list(test_file)
     print(karger_iteraded(adj_list))
